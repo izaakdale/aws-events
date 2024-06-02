@@ -84,6 +84,7 @@ func New(cfg aws.Config, queueURL string, optFuncs ...option) (*Client, error) {
 		cli.input.WaitTimeSeconds = defaultWaitTimeSeconds
 	}
 
+	cli.sqsClient = sqs.NewFromConfig(cfg)
 	return &cli, nil
 }
 
