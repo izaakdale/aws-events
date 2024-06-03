@@ -2,8 +2,10 @@ package listener
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -11,6 +13,8 @@ import (
 )
 
 var (
+	// match test events from AWS policy checher
+	testEventMatcher        = regexp.MustCompile(`.*:TestEvent`)
 	ErrClientNotInitialised = errors.New("uninitialised client")
 )
 
@@ -22,8 +26,9 @@ const (
 
 type (
 	Client struct {
-		sqsClient sqsConsumeAPI
-		input     *sqs.ReceiveMessageInput
+		sqsClient      sqsConsumeAPI
+		input          *sqs.ReceiveMessageInput
+		wantTestEvents bool
 	}
 	sqsConsumeAPI interface {
 		ReceiveMessage(ctx context.Context,
@@ -40,6 +45,7 @@ type (
 		visibilityTimeout   *int32
 		waitTimeSeconds     *int32
 		attributeNames      []types.MessageSystemAttributeName
+		wantTestEvents      *bool
 	}
 	option func(opt *configOptions) error
 	// This function allows the user to define how their messages should be processed.
@@ -84,6 +90,12 @@ func New(cfg aws.Config, queueURL string, optFuncs ...option) (*Client, error) {
 		cli.input.WaitTimeSeconds = defaultWaitTimeSeconds
 	}
 
+	if options.wantTestEvents != nil {
+		cli.wantTestEvents = *options.wantTestEvents
+	} else {
+		cli.wantTestEvents = false
+	}
+
 	cli.sqsClient = sqs.NewFromConfig(cfg)
 	return &cli, nil
 }
@@ -95,29 +107,53 @@ func (client *Client) Listen(ctx context.Context, pf ProcessorFunc, errChan chan
 		return
 	}
 	for {
-		msgResult, err := client.sqsClient.ReceiveMessage(ctx, client.input)
-		if err != nil {
-			errChan <- fmt.Errorf("failed to receive message: %w", err)
-		}
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			msgResult, err := client.sqsClient.ReceiveMessage(ctx, client.input)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to receive message: %w", err)
+			}
 
-		if msgResult != nil {
-			if msgResult.Messages != nil {
-				for _, m := range msgResult.Messages {
-					err = pf(ctx, []byte(*m.Body))
-					if err != nil {
-						errChan <- err
+			if msgResult != nil {
+				if msgResult.Messages != nil {
+					for _, m := range msgResult.Messages {
+
+						if client.wantTestEvents {
+							err = pf(ctx, []byte(*m.Body))
+							if err != nil {
+								errChan <- err
+							}
+						} else {
+							awsEvent := struct {
+								Type string `json:"Event"`
+							}{}
+							if err := json.Unmarshal([]byte(*m.Body), &awsEvent); err != nil {
+								errChan <- fmt.Errorf("failed to unmarshal message: %w", err)
+								continue
+							}
+
+							if !testEventMatcher.MatchString(awsEvent.Type) {
+								err = pf(ctx, []byte(*m.Body))
+								if err != nil {
+									errChan <- err
+								}
+							}
+						}
+
+						dMInput := &sqs.DeleteMessageInput{
+							QueueUrl:      client.input.QueueUrl,
+							ReceiptHandle: m.ReceiptHandle,
+						}
+						_, err = client.sqsClient.DeleteMessage(ctx, dMInput)
+						if err != nil {
+							errChan <- err
+						}
 					}
-					dMInput := &sqs.DeleteMessageInput{
-						QueueUrl:      client.input.QueueUrl,
-						ReceiptHandle: m.ReceiptHandle,
-					}
-					_, err = client.sqsClient.DeleteMessage(ctx, dMInput)
-					if err != nil {
-						errChan <- err
-					}
+				} else {
+					continue
 				}
-			} else {
-				continue
 			}
 		}
 	}

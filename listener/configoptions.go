@@ -36,3 +36,10 @@ func WithAttributeNames(n []types.MessageSystemAttributeName) option {
 		return nil
 	}
 }
+
+func WithTestEvents(want bool) option {
+	return func(opt *configOptions) error {
+		opt.wantTestEvents = &want
+		return nil
+	}
+}
