@@ -52,6 +52,7 @@ type (
 	ProcessorFunc func(context.Context, []byte) error
 )
 
+// New creates a new SQS listener listening to the queue with the specifed options.
 func New(cfg aws.Config, queueURL string, optFuncs ...option) (*Client, error) {
 	var options configOptions
 	for _, optFunc := range optFuncs {
@@ -116,43 +117,41 @@ func (client *Client) Listen(ctx context.Context, pf ProcessorFunc, errChan chan
 				errChan <- fmt.Errorf("failed to receive message: %w", err)
 			}
 
-			if msgResult != nil {
-				if msgResult.Messages != nil {
-					for _, m := range msgResult.Messages {
+			if msgResult == nil {
+				continue
+			}
 
-						if client.wantTestEvents {
-							err = pf(ctx, []byte(*m.Body))
-							if err != nil {
-								errChan <- err
-							}
-						} else {
-							awsEvent := struct {
-								Type string `json:"Event"`
-							}{}
-							if err := json.Unmarshal([]byte(*m.Body), &awsEvent); err != nil {
-								errChan <- fmt.Errorf("failed to unmarshal message: %w", err)
-								continue
-							}
+			for _, m := range msgResult.Messages {
 
-							if !testEventMatcher.MatchString(awsEvent.Type) {
-								err = pf(ctx, []byte(*m.Body))
-								if err != nil {
-									errChan <- err
-								}
-							}
-						}
+				if client.wantTestEvents {
+					err = pf(ctx, []byte(*m.Body))
+					if err != nil {
+						errChan <- err
+					}
+				} else {
+					awsEvent := struct {
+						Type string `json:"Event"`
+					}{}
+					if err := json.Unmarshal([]byte(*m.Body), &awsEvent); err != nil {
+						errChan <- fmt.Errorf("failed to unmarshal message: %w", err)
+						continue
+					}
 
-						dMInput := &sqs.DeleteMessageInput{
-							QueueUrl:      client.input.QueueUrl,
-							ReceiptHandle: m.ReceiptHandle,
-						}
-						_, err = client.sqsClient.DeleteMessage(ctx, dMInput)
+					if !testEventMatcher.MatchString(awsEvent.Type) {
+						err = pf(ctx, []byte(*m.Body))
 						if err != nil {
 							errChan <- err
 						}
 					}
-				} else {
-					continue
+				}
+
+				dMInput := &sqs.DeleteMessageInput{
+					QueueUrl:      client.input.QueueUrl,
+					ReceiptHandle: m.ReceiptHandle,
+				}
+				_, err = client.sqsClient.DeleteMessage(ctx, dMInput)
+				if err != nil {
+					errChan <- err
 				}
 			}
 		}

@@ -30,6 +30,7 @@ func WithWaitTimeSeconds(s int32) option {
 }
 
 // WithAttributeNames dictates which attributes to return from the queue.
+// Defaults to all.
 func WithAttributeNames(n []types.MessageSystemAttributeName) option {
 	return func(opt *configOptions) error {
 		opt.attributeNames = n
@@ -37,6 +38,8 @@ func WithAttributeNames(n []types.MessageSystemAttributeName) option {
 	}
 }
 
+// WithTestEvents allows the user to opt in or out of receiving AWS test events like s3:TestEvent.
+// Defaults to false.
 func WithTestEvents(want bool) option {
 	return func(opt *configOptions) error {
 		opt.wantTestEvents = &want
