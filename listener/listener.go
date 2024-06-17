@@ -122,23 +122,24 @@ func (client *Client) Listen(ctx context.Context, pf ProcessorFunc, errChan chan
 			}
 
 			for _, m := range msgResult.Messages {
+				awsEvent := struct {
+					Type    string `json:"Event"`
+					Message string `json:"Message"`
+				}{}
+				if err := json.Unmarshal([]byte(*m.Body), &awsEvent); err != nil {
+					errChan <- fmt.Errorf("failed to unmarshal message: %w", err)
+					continue
+				}
 
 				if client.wantTestEvents {
-					err = pf(ctx, []byte(*m.Body))
+					err = pf(ctx, []byte(awsEvent.Message))
 					if err != nil {
 						errChan <- err
 					}
 				} else {
-					awsEvent := struct {
-						Type string `json:"Event"`
-					}{}
-					if err := json.Unmarshal([]byte(*m.Body), &awsEvent); err != nil {
-						errChan <- fmt.Errorf("failed to unmarshal message: %w", err)
-						continue
-					}
 
 					if !testEventMatcher.MatchString(awsEvent.Type) {
-						err = pf(ctx, []byte(*m.Body))
+						err = pf(ctx, []byte(awsEvent.Message))
 						if err != nil {
 							errChan <- err
 						}

@@ -53,14 +53,14 @@ func New(cfg aws.Config, topicArn string, optFuncs ...option) (*Client, error) {
 
 // Publish sends a message to the Topic initialised in the client.
 // Returns the message id and an error
-func (client *Client) Publish(ctx context.Context, msg string) (*string, error) {
+func (client *Client) Publish(ctx context.Context, msg []byte) (*string, error) {
 	if client == nil {
 		return nil, ErrClientNotInitialised
 	}
 
 	input := &sns.PublishInput{
-		Message:  &msg,
-		TopicArn: &client.TopicArn,
+		Message:  aws.String(string(msg)),
+		TopicArn: aws.String(client.TopicArn),
 	}
 	result, err := client.sns.Publish(ctx, input)
 	if err != nil {
