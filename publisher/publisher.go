@@ -8,16 +8,18 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 )
 
+//go:generate mockgen -destination mocks/mock_publisher.go -package mocks . SNSPublishAPI
+
 var (
 	ErrClientNotInitialised = errors.New("uninitialised client")
 )
 
 type (
 	Client struct {
-		sns      snsPublishAPI
+		sns      SNSPublishAPI
 		TopicArn string
 	}
-	snsPublishAPI interface {
+	SNSPublishAPI interface {
 		Publish(
 			ctx context.Context,
 			params *sns.PublishInput,
@@ -25,7 +27,7 @@ type (
 		) (*sns.PublishOutput, error)
 	}
 	configOptions struct {
-		publisher snsPublishAPI
+		publisher SNSPublishAPI
 	}
 	option func(opt *configOptions) error
 )
@@ -54,10 +56,6 @@ func New(cfg aws.Config, topicArn string, optFuncs ...option) (*Client, error) {
 // Publish sends a message to the Topic initialised in the client.
 // Returns the message id and an error
 func (client *Client) Publish(ctx context.Context, msg []byte) (*string, error) {
-	if client == nil {
-		return nil, ErrClientNotInitialised
-	}
-
 	input := &sns.PublishInput{
 		Message:  aws.String(string(msg)),
 		TopicArn: aws.String(client.TopicArn),
@@ -70,7 +68,7 @@ func (client *Client) Publish(ctx context.Context, msg []byte) (*string, error) 
 }
 
 // WithPublisher allows the client to use their own publisher with the package.
-func WithPublisher(p snsPublishAPI) option {
+func WithPublisher(p SNSPublishAPI) option {
 	return func(opt *configOptions) error {
 		opt.publisher = p
 		return nil
